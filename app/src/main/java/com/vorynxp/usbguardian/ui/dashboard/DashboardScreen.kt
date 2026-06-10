@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -30,6 +31,7 @@ fun DashboardScreen(
     onNavigateToOnboarding: () -> Unit,
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
 
     // Trigger permission check on screen load/resume
@@ -94,7 +96,8 @@ fun DashboardScreen(
             // Shield status card
             ShieldStatusCard(
                 isActive = uiState.isProtectionActive,
-                onToggle = { viewModel.toggleProtection(it) }
+                isShizukuConnected = uiState.shizukuState == ShizukuState.CONNECTED,
+                onToggle = { viewModel.toggleProtection(context, it) }
             )
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -190,6 +193,7 @@ fun ShizukuStatusSection(
 @Composable
 fun ShieldStatusCard(
     isActive: Boolean,
+    isShizukuConnected: Boolean,
     onToggle: (Boolean) -> Unit
 ) {
     Card(
@@ -198,7 +202,9 @@ fun ShieldStatusCard(
             .padding(vertical = 8.dp),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isActive) {
+            containerColor = if (!isShizukuConnected) {
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+            } else if (isActive) {
                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
             } else {
                 MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)
@@ -206,7 +212,13 @@ fun ShieldStatusCard(
         ),
         border = BorderStroke(
             width = 1.dp,
-            color = if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.error.copy(alpha = 0.3f)
+            color = if (!isShizukuConnected) {
+                MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+            } else if (isActive) {
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+            } else {
+                MaterialTheme.colorScheme.error.copy(alpha = 0.3f)
+            }
         )
     ) {
         Column(
@@ -219,7 +231,9 @@ fun ShieldStatusCard(
                 modifier = Modifier
                     .size(120.dp)
                     .background(
-                        color = if (isActive) {
+                        color = if (!isShizukuConnected) {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                        } else if (isActive) {
                             MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                         } else {
                             MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
@@ -231,7 +245,13 @@ fun ShieldStatusCard(
                 Icon(
                     imageVector = Icons.Default.Lock,
                     contentDescription = null,
-                    tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    tint = if (!isShizukuConnected) {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                    } else if (isActive) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
                     modifier = Modifier
                         .size(64.dp)
                         .animateContentSize()
@@ -241,16 +261,30 @@ fun ShieldStatusCard(
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                text = if (isActive) "Protection Active" else "Protection Off",
+                text = if (!isShizukuConnected) {
+                    "Protection Suspended"
+                } else if (isActive) {
+                    "Protection Active"
+                } else {
+                    "Protection Off"
+                },
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                color = if (!isShizukuConnected) {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                } else if (isActive) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.error
+                }
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = if (isActive) {
+                text = if (!isShizukuConnected) {
+                    "Shizuku service is not connected. Connect Shizuku to enable protection."
+                } else if (isActive) {
                     "Blocking unauthorized USB device access."
                 } else {
                     "System vulnerable. All USB devices allowed."
@@ -265,6 +299,7 @@ fun ShieldStatusCard(
             Switch(
                 checked = isActive,
                 onCheckedChange = onToggle,
+                enabled = isShizukuConnected,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = MaterialTheme.colorScheme.primary,
                     checkedTrackColor = MaterialTheme.colorScheme.primaryContainer

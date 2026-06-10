@@ -17,7 +17,7 @@ class ShizukuUsbManager @Inject constructor() {
     }
 
     /**
-     * Set the package name associated with a USB device.
+     * Set the package name associated with a USB device (Host Mode).
      * Passing a null packageName (or a dummy value) revokes default handlers, 
      * effectively blocking access to the device.
      */
@@ -28,16 +28,12 @@ class ShizukuUsbManager @Inject constructor() {
         }
 
         try {
-            // Get the privileged USB service binder via Shizuku
             val usbBinder: IBinder = SystemServiceHelper.getSystemService("usb")
-            
-            // Reflectively find the stub and call asInterface
             val stubClass = Class.forName("android.hardware.usb.IUsbManager\$Stub")
             val asInterfaceMethod: Method = stubClass.getMethod("asInterface", IBinder::class.java)
             val iUsbManager: Any = asInterfaceMethod.invoke(null, usbBinder)
                 ?: throw IllegalStateException("Failed to cast binder to IUsbManager")
 
-            // Reflectively invoke setDevicePackage(UsbDevice, String, int)
             val iUsbManagerClass = Class.forName("android.hardware.usb.IUsbManager")
             val setDevicePackageMethod: Method = iUsbManagerClass.getMethod(
                 "setDevicePackage",
@@ -56,46 +52,43 @@ class ShizukuUsbManager @Inject constructor() {
     }
 
     /**
-     * Runs a shell command using Shizuku's process execution API via reflection.
-     * Bypasses the compiler private-access restriction.
+     * Sets the active USB client functions (gadget mode) via direct Binder calls.
+     * Pass 0L to disable MTP/ADB (charge only), or 5L (FUNCTION_MTP = 4 | FUNCTION_ADB = 1) to restore default functions.
      */
-    private fun runShizukuShellCommand(cmd: Array<String>): Boolean {
+    fun setCurrentUsbFunctions(functions: Long): Boolean {
         if (!Shizuku.pingBinder()) {
-            Log.e(TAG, "Shizuku binder is not available to run command: ${cmd.joinToString(" ")}")
+            Log.e(TAG, "Shizuku binder is not available to set USB functions")
             return false
         }
-        return try {
-            val newProcessMethod = Shizuku::class.java.getDeclaredMethod(
-                "newProcess",
-                Array<String>::class.java,
-                Array<String>::class.java,
-                String::class.java
-            )
-            newProcessMethod.isAccessible = true
-            val process = newProcessMethod.invoke(null, cmd, null, null) as Process
-            process.waitFor()
-            val exitCode = process.exitValue()
-            Log.d(TAG, "Command '${cmd.joinToString(" ")}' completed with exit code $exitCode")
-            exitCode == 0
-        } catch (e: java.lang.Exception) {
-            Log.e(TAG, "Failed to execute command via Shizuku reflection", e)
-            false
+        try {
+            val usbBinder = SystemServiceHelper.getSystemService("usb")
+            val stubClass = Class.forName("android.hardware.usb.IUsbManager\$Stub")
+            val asInterfaceMethod = stubClass.getMethod("asInterface", IBinder::class.java)
+            val iUsbManager = asInterfaceMethod.invoke(null, usbBinder)
+                ?: throw IllegalStateException("Failed to cast binder to IUsbManager")
+
+            val iUsbManagerClass = Class.forName("android.hardware.usb.IUsbManager")
+            
+            try {
+                // Try modern setCurrentFunctions(long)
+                val method = iUsbManagerClass.getMethod("setCurrentFunctions", Long::class.javaPrimitiveType)
+                method.invoke(iUsbManager, functions)
+                Log.d(TAG, "Successfully invoked setCurrentFunctions($functions)")
+            } catch (e: NoSuchMethodException) {
+                // Fallback to older setCurrentFunction(String, boolean)
+                val functionStr = if (functions == 0L) "none" else "mtp,adb"
+                val method = iUsbManagerClass.getMethod(
+                    "setCurrentFunction",
+                    String::class.java,
+                    Boolean::class.javaPrimitiveType
+                )
+                method.invoke(iUsbManager, functionStr, false)
+                Log.d(TAG, "Successfully invoked fallback setCurrentFunction($functionStr, false)")
+            }
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting USB client functions via binder", e)
+            return false
         }
-    }
-
-    /**
-     * Sets the active USB client functions (gadget mode) via Shizuku shell.
-     * Pass "none" to disable MTP/ADB (charge only), or "mtp,adb" to restore default functions.
-     */
-    fun setUserUsbFunctions(functions: String): Boolean {
-        return runShizukuShellCommand(arrayOf("svc", "usb", "setFunctions", functions))
-    }
-
-    /**
-     * Enables or disables USB Debugging (ADB) in global settings.
-     */
-    fun setAdbEnabledSetting(enabled: Boolean): Boolean {
-        val value = if (enabled) "1" else "0"
-        return runShizukuShellCommand(arrayOf("settings", "put", "global", "adb_enabled", value))
     }
 }

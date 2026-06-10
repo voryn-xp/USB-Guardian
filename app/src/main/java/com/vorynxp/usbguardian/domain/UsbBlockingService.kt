@@ -105,10 +105,9 @@ class UsbBlockingService : Service() {
             userPreferences.masterToggleFlow.collect { active ->
                 Log.d(TAG, "Master toggle state collected in service: active=$active")
                 if (!active) {
-                    shizukuUsbManager.setUserUsbFunctions("mtp,adb")
-                    // Restore adb settings globally
-                    shizukuUsbManager.setAdbEnabledSetting(true)
+                    shizukuUsbManager.setCurrentUsbFunctions(5L) // MTP + ADB (restore default)
                     isPcBlockedLogged = false
+                    stopSelf()
                 } else {
                     // Check if USB is already plugged in when toggling ON
                     val stickyIntent = registerReceiver(null, android.content.IntentFilter("android.hardware.usb.action.USB_STATE"))
@@ -494,11 +493,9 @@ class UsbBlockingService : Service() {
     }
 
     private fun blockPcConnection() {
-        val success = shizukuUsbManager.setUserUsbFunctions("none")
+        val success = shizukuUsbManager.setCurrentUsbFunctions(0L) // Disable MTP + ADB
         if (success && !isPcBlockedLogged) {
             isPcBlockedLogged = true
-            // Disable adb settings globally for double protection
-            shizukuUsbManager.setAdbEnabledSetting(false)
             serviceScope.launch {
                 logDao.insertLog(LogEntity(
                     timestamp = System.currentTimeMillis(),

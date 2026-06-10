@@ -1,6 +1,9 @@
 package com.vorynxp.usbguardian.ui.dashboard
 
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vorynxp.usbguardian.data.db.LogDao
@@ -49,11 +52,16 @@ class DashboardViewModel @Inject constructor(
         _shizukuState.value = ShizukuState.DISCONNECTED
     }
 
+    private val requestPermissionResultListener = Shizuku.OnRequestPermissionResultListener { _, _ ->
+        checkShizukuPermission()
+    }
+
     init {
         checkShizukuPermission()
         try {
             Shizuku.addBinderReceivedListener(binderReceivedListener)
             Shizuku.addBinderDeadListener(binderDeadListener)
+            Shizuku.addRequestPermissionResultListener(requestPermissionResultListener)
         } catch (e: Exception) {
             // Safe fallback if binder not bound yet
         }
@@ -67,9 +75,25 @@ class DashboardViewModel @Inject constructor(
         }
     }
 
-    fun toggleProtection(enabled: Boolean) {
+    fun toggleProtection(context: Context, enabled: Boolean) {
         viewModelScope.launch {
             userPreferences.setMasterToggle(enabled)
+            val intent = Intent(context, UsbBlockingService::class.java).apply {
+                action = if (enabled) UsbBlockingService.ACTION_START_SERVICE else UsbBlockingService.ACTION_STOP_SERVICE
+            }
+            try {
+                if (enabled) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(intent)
+                    } else {
+                        context.startService(intent)
+                    }
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                // Ignore
+            }
         }
     }
 
@@ -91,7 +115,7 @@ class DashboardViewModel @Inject constructor(
         usbDeviceDao.getDevicesCountFlow()
     ) { active, shizuku, blocked, allowed, total ->
         DashboardUiState(
-            isProtectionActive = active,
+            isProtectionActive = active && shizuku == ShizukuState.CONNECTED,
             shizukuState = shizuku,
             blockedTodayCount = blocked,
             allowedCount = allowed,
@@ -108,6 +132,7 @@ class DashboardViewModel @Inject constructor(
         try {
             Shizuku.removeBinderReceivedListener(binderReceivedListener)
             Shizuku.removeBinderDeadListener(binderDeadListener)
+            Shizuku.removeRequestPermissionResultListener(requestPermissionResultListener)
         } catch (e: Exception) {
             // Ignore
         }
