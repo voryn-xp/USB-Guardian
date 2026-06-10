@@ -70,11 +70,59 @@ class UsbBlockingService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var notificationManager: NotificationManager
 
+    private var isPcBlockedLogged = false
+    private val usbStateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == "android.hardware.usb.action.USB_STATE") {
+                val connected = intent.getBooleanExtra("connected", false)
+                val configured = intent.getBooleanExtra("configured", false)
+                Log.d(TAG, "USB_STATE change: connected=$connected, configured=$configured")
+                
+                if (connected) {
+                    handlePcConnectionState()
+                } else {
+                    isPcBlockedLogged = false
+                }
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannels()
         startForeground(PERSISTENT_NOTIF_ID, createPersistentNotification())
+
+        // Register dynamic USB_STATE receiver
+        try {
+            registerReceiver(usbStateReceiver, android.content.IntentFilter("android.hardware.usb.action.USB_STATE"))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register usbStateReceiver", e)
+        }
+
+        // Listen for protection toggle changes
+        serviceScope.launch {
+            userPreferences.masterToggleFlow.collect { active ->
+                Log.d(TAG, "Master toggle state collected in service: active=$active")
+                if (!active) {
+                    shizukuUsbManager.setUserUsbFunctions("mtp,adb")
+                    // Restore adb settings globally
+                    try {
+                        Shizuku.newProcess(arrayOf("settings", "put", "global", "adb_enabled", "1"), null, null)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to restore adb setting globally", e)
+                    }
+                    isPcBlockedLogged = false
+                } else {
+                    // Check if USB is already plugged in when toggling ON
+                    val stickyIntent = registerReceiver(null, android.content.IntentFilter("android.hardware.usb.action.USB_STATE"))
+                    val connected = stickyIntent?.getBooleanExtra("connected", false) ?: false
+                    if (connected) {
+                        blockPcConnection()
+                    }
+                }
+        }
+
         Log.d(TAG, "UsbBlockingService Created and started in Foreground")
     }
 
@@ -422,6 +470,11 @@ class UsbBlockingService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        try {
+            unregisterReceiver(usbStateReceiver)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to unregister usbStateReceiver", e)
+        }
         serviceScope.launch {
             // Log that service stopped
             logDao.insertLog(LogEntity(
@@ -432,5 +485,36 @@ class UsbBlockingService : Service() {
             ))
         }
         Log.d(TAG, "UsbBlockingService Destroyed")
+    }
+
+    private fun handlePcConnectionState() {
+        serviceScope.launch {
+            val masterEnabled = userPreferences.masterToggleFlow.first()
+            if (masterEnabled) {
+                blockPcConnection()
+            }
+        }
+    }
+
+    private fun blockPcConnection() {
+        val success = shizukuUsbManager.setUserUsbFunctions("none")
+        if (success && !isPcBlockedLogged) {
+            isPcBlockedLogged = true
+            // Disable adb settings globally for double protection
+            try {
+                Shizuku.newProcess(arrayOf("settings", "put", "global", "adb_enabled", "0"), null, null)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to disable adb setting globally", e)
+            }
+            serviceScope.launch {
+                logDao.insertLog(LogEntity(
+                    timestamp = System.currentTimeMillis(),
+                    deviceName = "Computer (PC)",
+                    vidPid = "0000:0000",
+                    action = "Blocked PC Access (ADB/MTP Disabled)"
+                ))
+            }
+            showBlockedNotification("Computer (PC)")
+        }
     }
 }

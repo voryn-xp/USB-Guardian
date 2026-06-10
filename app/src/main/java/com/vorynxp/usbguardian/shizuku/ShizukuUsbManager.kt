@@ -54,4 +54,25 @@ class ShizukuUsbManager @Inject constructor() {
             return false
         }
     }
+
+    /**
+     * Sets the active USB client functions (gadget mode) via Shizuku shell.
+     * Pass "none" to disable MTP/ADB (charge only), or "mtp,adb" to restore default functions.
+     */
+    fun setUserUsbFunctions(functions: String): Boolean {
+        if (!Shizuku.pingBinder()) {
+            Log.e(TAG, "Shizuku binder is not available to set USB functions")
+            return false
+        }
+        return try {
+            val process = Shizuku.newProcess(arrayOf("svc", "usb", "setFunctions", functions), null, null)
+            process.waitFor()
+            val exitCode = process.exitValue()
+            Log.d(TAG, "svc usb setFunctions $functions completed with exit code $exitCode")
+            exitCode == 0
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to run svc usb setFunctions via Shizuku", e)
+            false
+        }
+    }
 }
