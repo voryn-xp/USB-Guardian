@@ -46,6 +46,9 @@
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
                 <action android:name="android.hardware.usb.action.USB_DEVICE_DETACHED" />
             </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/device_filter" />
         </receiver>
 
         <provider
