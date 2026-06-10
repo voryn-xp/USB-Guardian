@@ -1,0 +1,18 @@
+# Built artifacts
+**/build
+*.apk
+*.aar
+
+# Gradle files
+.gradle/
+/local.properties
+/captures
+
+# IDE files (Android Studio / IntelliJ / VS Code)
+.idea/
+*.iml
+.DS_Store
+.vscode/
+
+# Log files
+*.log
