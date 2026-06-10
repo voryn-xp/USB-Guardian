@@ -4,10 +4,16 @@ import android.app.Application
 import android.content.Intent
 import android.os.Build
 import android.util.Log
+import com.vorynxp.usbguardian.data.prefs.UserPreferences
 import com.vorynxp.usbguardian.domain.UsbBlockingService
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import org.lsposed.hiddenapibypass.HiddenApiBypass
 import rikka.shizuku.Shizuku
+import javax.inject.Inject
 
 @HiltAndroidApp
 class App : Application() {
@@ -15,6 +21,9 @@ class App : Application() {
     companion object {
         private const val TAG = "USBGuardianApp"
     }
+
+    @Inject
+    lateinit var userPreferences: UserPreferences
 
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         Log.d(TAG, "Shizuku binder received!")
@@ -45,17 +54,24 @@ class App : Application() {
     }
 
     private fun startBlockingService() {
-        val intent = Intent(this, UsbBlockingService::class.java).apply {
-            action = UsbBlockingService.ACTION_START_SERVICE
-        }
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val enabled = userPreferences.masterToggleFlow.first()
+                if (enabled) {
+                    val intent = Intent(this@App, UsbBlockingService::class.java).apply {
+                        action = UsbBlockingService.ACTION_START_SERVICE
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(intent)
+                    } else {
+                        startService(intent)
+                    }
+                } else {
+                    Log.d(TAG, "Protection disabled. Not starting UsbBlockingService on binder received.")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start UsbBlockingService from App init", e)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start UsbBlockingService from App init", e)
         }
     }
 }

@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.vorynxp.usbguardian.data.db.LogDao
 import com.vorynxp.usbguardian.data.db.UsbDeviceDao
 import com.vorynxp.usbguardian.data.prefs.UserPreferences
+import com.vorynxp.usbguardian.domain.UsbBlockingService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
