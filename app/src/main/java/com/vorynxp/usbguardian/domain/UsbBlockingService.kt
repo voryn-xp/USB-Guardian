@@ -121,6 +121,7 @@ class UsbBlockingService : Service() {
                         blockPcConnection()
                     }
                 }
+            }
         }
 
         Log.d(TAG, "UsbBlockingService Created and started in Foreground")
