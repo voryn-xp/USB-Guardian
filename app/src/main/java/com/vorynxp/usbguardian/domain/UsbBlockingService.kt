@@ -107,11 +107,7 @@ class UsbBlockingService : Service() {
                 if (!active) {
                     shizukuUsbManager.setUserUsbFunctions("mtp,adb")
                     // Restore adb settings globally
-                    try {
-                        Shizuku.newProcess(arrayOf("settings", "put", "global", "adb_enabled", "1"), null, null)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to restore adb setting globally", e)
-                    }
+                    shizukuUsbManager.setAdbEnabledSetting(true)
                     isPcBlockedLogged = false
                 } else {
                     // Check if USB is already plugged in when toggling ON
@@ -502,11 +498,7 @@ class UsbBlockingService : Service() {
         if (success && !isPcBlockedLogged) {
             isPcBlockedLogged = true
             // Disable adb settings globally for double protection
-            try {
-                Shizuku.newProcess(arrayOf("settings", "put", "global", "adb_enabled", "0"), null, null)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to disable adb setting globally", e)
-            }
+            shizukuUsbManager.setAdbEnabledSetting(false)
             serviceScope.launch {
                 logDao.insertLog(LogEntity(
                     timestamp = System.currentTimeMillis(),

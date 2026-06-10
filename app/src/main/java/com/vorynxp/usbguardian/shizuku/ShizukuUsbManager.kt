@@ -56,23 +56,46 @@ class ShizukuUsbManager @Inject constructor() {
     }
 
     /**
+     * Runs a shell command using Shizuku's process execution API via reflection.
+     * Bypasses the compiler private-access restriction.
+     */
+    private fun runShizukuShellCommand(cmd: Array<String>): Boolean {
+        if (!Shizuku.pingBinder()) {
+            Log.e(TAG, "Shizuku binder is not available to run command: ${cmd.joinToString(" ")}")
+            return false
+        }
+        return try {
+            val newProcessMethod = Shizuku::class.java.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java,
+                Array<String>::class.java,
+                String::class.java
+            )
+            newProcessMethod.isAccessible = true
+            val process = newProcessMethod.invoke(null, cmd, null, null) as Process
+            process.waitFor()
+            val exitCode = process.exitValue()
+            Log.d(TAG, "Command '${cmd.joinToString(" ")}' completed with exit code $exitCode")
+            exitCode == 0
+        } catch (e: java.lang.Exception) {
+            Log.e(TAG, "Failed to execute command via Shizuku reflection", e)
+            false
+        }
+    }
+
+    /**
      * Sets the active USB client functions (gadget mode) via Shizuku shell.
      * Pass "none" to disable MTP/ADB (charge only), or "mtp,adb" to restore default functions.
      */
     fun setUserUsbFunctions(functions: String): Boolean {
-        if (!Shizuku.pingBinder()) {
-            Log.e(TAG, "Shizuku binder is not available to set USB functions")
-            return false
-        }
-        return try {
-            val process = Shizuku.newProcess(arrayOf("svc", "usb", "setFunctions", functions), null, null)
-            process.waitFor()
-            val exitCode = process.exitValue()
-            Log.d(TAG, "svc usb setFunctions $functions completed with exit code $exitCode")
-            exitCode == 0
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to run svc usb setFunctions via Shizuku", e)
-            false
-        }
+        return runShizukuShellCommand(arrayOf("svc", "usb", "setFunctions", functions))
+    }
+
+    /**
+     * Enables or disables USB Debugging (ADB) in global settings.
+     */
+    fun setAdbEnabledSetting(enabled: Boolean): Boolean {
+        val value = if (enabled) "1" else "0"
+        return runShizukuShellCommand(arrayOf("settings", "put", "global", "adb_enabled", value))
     }
 }
