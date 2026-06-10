@@ -30,7 +30,7 @@ class App : Application() {
 
         // Bypass hidden API restrictions on Android P+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            HiddenApiBypass.addBridgeToApp()
+            HiddenApiBypass.addHiddenApiExemptions("L")
             Log.d(TAG, "Hidden API restrictions bypassed")
         }
 

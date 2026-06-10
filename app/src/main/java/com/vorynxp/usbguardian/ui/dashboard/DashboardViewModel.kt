@@ -41,6 +41,14 @@ class DashboardViewModel @Inject constructor(
     private val _shizukuState = MutableStateFlow(ShizukuState.DISCONNECTED)
     val shizukuState: StateFlow<ShizukuState> = _shizukuState
 
+    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+        checkShizukuPermission()
+    }
+
+    private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        _shizukuState.value = ShizukuState.DISCONNECTED
+    }
+
     init {
         checkShizukuPermission()
         try {
@@ -49,14 +57,6 @@ class DashboardViewModel @Inject constructor(
         } catch (e: Exception) {
             // Safe fallback if binder not bound yet
         }
-    }
-
-    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
-        checkShizukuPermission()
-    }
-
-    private val binderDeadListener = Shizuku.OnBinderDeadListener {
-        _shizukuState.value = ShizukuState.DISCONNECTED
     }
 
     fun checkShizukuPermission() {
