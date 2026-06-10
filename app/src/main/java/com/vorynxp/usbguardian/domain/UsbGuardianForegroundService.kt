@@ -1,14 +1,18 @@
 package com.vorynxp.usbguardian.domain
 
+import android.app.NotificationManager
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.vorynxp.usbguardian.R
+import com.vorynxp.usbguardian.data.db.LogDao
+import com.vorynxp.usbguardian.data.db.LogEntity
 import com.vorynxp.usbguardian.data.prefs.UserPreferences
 import com.vorynxp.usbguardian.shizuku.ShizukuUsbManager
 import dagger.hilt.android.AndroidEntryPoint
@@ -17,6 +21,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import rikka.shizuku.Shizuku
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -33,6 +39,9 @@ class UsbGuardianForegroundService : Service() {
 
     @Inject
     lateinit var userPreferences: UserPreferences
+
+    @Inject
+    lateinit var logDao: LogDao
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var isPcBlockedLogged = false
@@ -53,6 +62,20 @@ class UsbGuardianForegroundService : Service() {
         }
     }
 
+    private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
+        updateNotification()
+        checkAndBlockPc()
+    }
+
+    private val binderDeadListener = Shizuku.OnBinderDeadListener {
+        updateNotification()
+    }
+
+    private val permissionResultListener = Shizuku.OnRequestPermissionResultListener { _, _ ->
+        updateNotification()
+        checkAndBlockPc()
+    }
+
     override fun onCreate() {
         super.onCreate()
         // Register dynamic USB_STATE receiver
@@ -60,6 +83,15 @@ class UsbGuardianForegroundService : Service() {
             registerReceiver(usbStateReceiver, IntentFilter("android.hardware.usb.action.USB_STATE"))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to register usbStateReceiver", e)
+        }
+
+        // Register Shizuku binder and permission listeners to dynamically update notifications
+        try {
+            Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
+            Shizuku.addBinderDeadListener(binderDeadListener)
+            Shizuku.addRequestPermissionResultListener(permissionResultListener)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register Shizuku listeners", e)
         }
 
         // Listen for protection toggle changes to restore default state if disabled
@@ -70,21 +102,17 @@ class UsbGuardianForegroundService : Service() {
                     shizukuUsbManager.setCurrentUsbFunctions(5L)
                     isPcBlockedLogged = false
                 } else {
-                    // If already plugged in when active, block PC connection
-                    val stickyIntent = registerReceiver(null, IntentFilter("android.hardware.usb.action.USB_STATE"))
-                    val connected = stickyIntent?.getBooleanExtra("connected", false) ?: false
-                    if (connected) {
-                        blockPcConnection()
-                    }
+                    checkAndBlockPc()
                 }
             }
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val statusText = getShizukuStatusText()
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("USB Guardian Active")
-            .setContentText("Monitoring USB connections")
+            .setContentTitle("USB Guardian")
+            .setContentText(statusText)
             .setSmallIcon(R.drawable.app_icon)
             .setOngoing(true)
             .build()
@@ -102,6 +130,41 @@ class UsbGuardianForegroundService : Service() {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to unregister usbStateReceiver", e)
         }
+        try {
+            Shizuku.removeBinderReceivedListener(binderReceivedListener)
+            Shizuku.removeBinderDeadListener(binderDeadListener)
+            Shizuku.removeRequestPermissionResultListener(permissionResultListener)
+        } catch (e: Exception) {
+            // Ignore
+        }
+    }
+
+    private fun getShizukuStatusText(): String {
+        return when {
+            !Shizuku.pingBinder() -> "Waiting for Shizuku service..."
+            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED -> "Monitoring USB connections"
+            else -> "Grant Shizuku permission to enable protection"
+        }
+    }
+
+    private fun updateNotification() {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val statusText = getShizukuStatusText()
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("USB Guardian")
+            .setContentText(statusText)
+            .setSmallIcon(R.drawable.app_icon)
+            .setOngoing(true)
+            .build()
+        notificationManager.notify(NOTIFICATION_ID, notification)
+    }
+
+    private fun checkAndBlockPc() {
+        val stickyIntent = registerReceiver(null, IntentFilter("android.hardware.usb.action.USB_STATE"))
+        val connected = stickyIntent?.getBooleanExtra("connected", false) ?: false
+        if (connected) {
+            handlePcConnectionState()
+        }
     }
 
     private fun handlePcConnectionState() {
@@ -114,10 +177,39 @@ class UsbGuardianForegroundService : Service() {
     }
 
     private fun blockPcConnection() {
-        val success = shizukuUsbManager.setCurrentUsbFunctions(0L) // Disable MTP + ADB
-        if (success && !isPcBlockedLogged) {
-            isPcBlockedLogged = true
-            Log.d(TAG, "Blocked PC connection successfully")
+        serviceScope.launch {
+            val success = shizukuUsbManager.setCurrentUsbFunctions(0L) // Disable MTP + ADB
+            if (success) {
+                if (!isPcBlockedLogged) {
+                    isPcBlockedLogged = true
+                    logDao.insertLog(
+                        LogEntity(
+                            timestamp = System.currentTimeMillis(),
+                            deviceName = "Computer (PC)",
+                            vidPid = "0000:0000",
+                            action = "Blocked"
+                        )
+                    )
+                    withContext(Dispatchers.Main) {
+                        UsbAlertNotificationManager.showPcBlockedAlert(this@UsbGuardianForegroundService, true)
+                    }
+                }
+            } else {
+                // If it fails, log once but allow retry on permission change
+                if (!isPcBlockedLogged) {
+                    logDao.insertLog(
+                        LogEntity(
+                            timestamp = System.currentTimeMillis(),
+                            deviceName = "Computer (PC)",
+                            vidPid = "0000:0000",
+                            action = "Block Failed"
+                        )
+                    )
+                    withContext(Dispatchers.Main) {
+                        UsbAlertNotificationManager.showPcBlockedAlert(this@UsbGuardianForegroundService, false)
+                    }
+                }
+            }
         }
     }
 }

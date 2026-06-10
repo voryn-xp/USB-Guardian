@@ -36,4 +36,36 @@ object UsbAlertNotificationManager {
 
         notificationManager.notify(NOTIFICATION_ID, notification)
     }
+
+    fun showPcBlockedAlert(context: Context, blockedSuccessfully: Boolean) {
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        
+        val intent = Intent(context, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            context, 0, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val title: String
+        val text: String
+        if (blockedSuccessfully) {
+            title = "PC Connection Blocked"
+            text = "Blocked USB debugging/file transfer access."
+        } else {
+            title = "PC Connection Detected"
+            text = "Block failed. Grant Shizuku permission to secure connection."
+        }
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setSmallIcon(com.vorynxp.usbguardian.R.drawable.app_icon)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .build()
+
+        notificationManager.notify(NOTIFICATION_ID + 1, notification)
+    }
 }
