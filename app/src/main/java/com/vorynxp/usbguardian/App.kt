@@ -1,11 +1,14 @@
 package com.vorynxp.usbguardian
 
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Intent
 import android.os.Build
 import android.util.Log
 import com.vorynxp.usbguardian.data.prefs.UserPreferences
-import com.vorynxp.usbguardian.domain.UsbBlockingService
+import com.vorynxp.usbguardian.domain.UsbGuardianForegroundService
+import com.vorynxp.usbguardian.shizuku.ShizukuUsbManager
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +28,9 @@ class App : Application() {
     @Inject
     lateinit var userPreferences: UserPreferences
 
+    @Inject
+    lateinit var shizukuUsbManager: ShizukuUsbManager
+
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         Log.d(TAG, "Shizuku binder received!")
         startBlockingService()
@@ -43,7 +49,13 @@ class App : Application() {
             Log.d(TAG, "Hidden API restrictions bypassed")
         }
 
-        // Setup Shizuku listeners
+        // Initialize Shizuku binder lifecycle helper
+        shizukuUsbManager.init()
+
+        // Create notification channels
+        createNotificationChannels()
+
+        // Setup Shizuku listeners for foreground service auto-starting
         try {
             Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
             Shizuku.addBinderDeadListener(binderDeadListener)
@@ -53,24 +65,37 @@ class App : Application() {
         }
     }
 
+    private fun createNotificationChannels() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                "usb_guardian_channel",
+                "USB Events",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Alerts for USB device connections"
+                enableVibration(true)
+            }
+            getSystemService(NotificationManager::class.java)
+                .createNotificationChannel(channel)
+        }
+    }
+
     private fun startBlockingService() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val enabled = userPreferences.masterToggleFlow.first()
                 if (enabled) {
-                    val intent = Intent(this@App, UsbBlockingService::class.java).apply {
-                        action = UsbBlockingService.ACTION_START_SERVICE
-                    }
+                    val intent = Intent(this@App, UsbGuardianForegroundService::class.java)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         startForegroundService(intent)
                     } else {
                         startService(intent)
                     }
                 } else {
-                    Log.d(TAG, "Protection disabled. Not starting UsbBlockingService on binder received.")
+                    Log.d(TAG, "Protection disabled. Not starting UsbGuardianForegroundService on binder received.")
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to start UsbBlockingService from App init", e)
+                Log.e(TAG, "Failed to start UsbGuardianForegroundService from App init", e)
             }
         }
     }

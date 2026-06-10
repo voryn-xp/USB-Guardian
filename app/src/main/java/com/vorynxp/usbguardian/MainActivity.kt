@@ -1,6 +1,7 @@
 package com.vorynxp.usbguardian
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -17,13 +18,17 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
 import com.vorynxp.usbguardian.data.prefs.ThemeMode
 import com.vorynxp.usbguardian.data.prefs.UserPreferences
+import com.vorynxp.usbguardian.domain.UsbGuardianForegroundService
 import com.vorynxp.usbguardian.ui.navigation.BottomNavBar
 import com.vorynxp.usbguardian.ui.navigation.NavGraph
 import com.vorynxp.usbguardian.ui.theme.USBGuardianTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
 import javax.inject.Inject
 
@@ -69,6 +74,21 @@ class MainActivity : ComponentActivity() {
             Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to register Shizuku permission listener", e)
+        }
+
+        // Auto-start persistent service if enabled
+        lifecycleScope.launch {
+            try {
+                val enabled = userPreferences.masterToggleFlow.first()
+                if (enabled) {
+                    ContextCompat.startForegroundService(
+                        this@MainActivity,
+                        Intent(this@MainActivity, UsbGuardianForegroundService::class.java)
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start service on launch", e)
+            }
         }
 
         setContent {

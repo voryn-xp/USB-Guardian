@@ -9,7 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.vorynxp.usbguardian.data.db.LogDao
 import com.vorynxp.usbguardian.data.db.UsbDeviceDao
 import com.vorynxp.usbguardian.data.prefs.UserPreferences
-import com.vorynxp.usbguardian.domain.UsbBlockingService
+import com.vorynxp.usbguardian.domain.UsbGuardianForegroundService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -79,9 +79,7 @@ class DashboardViewModel @Inject constructor(
     fun toggleProtection(context: Context, enabled: Boolean) {
         viewModelScope.launch {
             userPreferences.setMasterToggle(enabled)
-            val intent = Intent(context, UsbBlockingService::class.java).apply {
-                action = if (enabled) UsbBlockingService.ACTION_START_SERVICE else UsbBlockingService.ACTION_STOP_SERVICE
-            }
+            val intent = Intent(context, UsbGuardianForegroundService::class.java)
             try {
                 if (enabled) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -90,7 +88,7 @@ class DashboardViewModel @Inject constructor(
                         context.startService(intent)
                     }
                 } else {
-                    context.startService(intent)
+                    context.stopService(intent)
                 }
             } catch (e: Exception) {
                 // Ignore

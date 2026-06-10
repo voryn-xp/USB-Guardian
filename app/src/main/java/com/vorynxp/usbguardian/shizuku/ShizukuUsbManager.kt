@@ -16,24 +16,41 @@ class ShizukuUsbManager @Inject constructor() {
         private const val TAG = "ShizukuUsbManager"
     }
 
+    private var iUsbManager: Any? = null
+
+    fun init() {
+        try {
+            Shizuku.addBinderReceivedListenerSticky {
+                try {
+                    val usbBinder = SystemServiceHelper.getSystemService("usb")
+                    val stubClass = Class.forName("android.hardware.usb.IUsbManager\$Stub")
+                    val asInterfaceMethod = stubClass.getMethod("asInterface", IBinder::class.java)
+                    iUsbManager = asInterfaceMethod.invoke(null, usbBinder)
+                    Log.d(TAG, "IUsbManager binder acquired successfully")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to get IUsbManager: ${e.message}")
+                }
+            }
+            Shizuku.addBinderDeadListener {
+                iUsbManager = null
+                Log.w(TAG, "Shizuku binder died")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to setup binder listeners", e)
+        }
+    }
+
     /**
      * Set the package name associated with a USB device (Host Mode).
      * Passing a null packageName (or a dummy value) revokes default handlers, 
      * effectively blocking access to the device.
      */
     fun setDevicePackage(device: UsbDevice, packageName: String?, userId: Int): Boolean {
-        if (!Shizuku.pingBinder()) {
-            Log.e(TAG, "Shizuku binder is not available")
+        val manager = iUsbManager ?: run {
+            Log.e(TAG, "Cannot set device package — IUsbManager is null")
             return false
         }
-
         try {
-            val usbBinder: IBinder = SystemServiceHelper.getSystemService("usb")
-            val stubClass = Class.forName("android.hardware.usb.IUsbManager\$Stub")
-            val asInterfaceMethod: Method = stubClass.getMethod("asInterface", IBinder::class.java)
-            val iUsbManager: Any = asInterfaceMethod.invoke(null, usbBinder)
-                ?: throw IllegalStateException("Failed to cast binder to IUsbManager")
-
             val iUsbManagerClass = Class.forName("android.hardware.usb.IUsbManager")
             val setDevicePackageMethod: Method = iUsbManagerClass.getMethod(
                 "setDevicePackage",
@@ -42,7 +59,7 @@ class ShizukuUsbManager @Inject constructor() {
                 Int::class.javaPrimitiveType
             )
 
-            setDevicePackageMethod.invoke(iUsbManager, device, packageName, userId)
+            setDevicePackageMethod.invoke(manager, device, packageName, userId)
             Log.d(TAG, "Successfully setDevicePackage for ${device.deviceName} (VID:PID = ${device.vendorId}:${device.productId}) to '$packageName'")
             return true
         } catch (e: Exception) {
@@ -56,23 +73,17 @@ class ShizukuUsbManager @Inject constructor() {
      * Pass 0L to disable MTP/ADB (charge only), or 5L (FUNCTION_MTP = 4 | FUNCTION_ADB = 1) to restore default functions.
      */
     fun setCurrentUsbFunctions(functions: Long): Boolean {
-        if (!Shizuku.pingBinder()) {
-            Log.e(TAG, "Shizuku binder is not available to set USB functions")
+        val manager = iUsbManager ?: run {
+            Log.e(TAG, "Cannot set USB functions — IUsbManager is null")
             return false
         }
         try {
-            val usbBinder = SystemServiceHelper.getSystemService("usb")
-            val stubClass = Class.forName("android.hardware.usb.IUsbManager\$Stub")
-            val asInterfaceMethod = stubClass.getMethod("asInterface", IBinder::class.java)
-            val iUsbManager = asInterfaceMethod.invoke(null, usbBinder)
-                ?: throw IllegalStateException("Failed to cast binder to IUsbManager")
-
             val iUsbManagerClass = Class.forName("android.hardware.usb.IUsbManager")
             
             try {
                 // Try modern setCurrentFunctions(long)
                 val method = iUsbManagerClass.getMethod("setCurrentFunctions", Long::class.javaPrimitiveType)
-                method.invoke(iUsbManager, functions)
+                method.invoke(manager, functions)
                 Log.d(TAG, "Successfully invoked setCurrentFunctions($functions)")
             } catch (e: NoSuchMethodException) {
                 // Fallback to older setCurrentFunction(String, boolean)
@@ -82,7 +93,7 @@ class ShizukuUsbManager @Inject constructor() {
                     String::class.java,
                     Boolean::class.javaPrimitiveType
                 )
-                method.invoke(iUsbManager, functionStr, false)
+                method.invoke(manager, functionStr, false)
                 Log.d(TAG, "Successfully invoked fallback setCurrentFunction($functionStr, false)")
             }
             return true
